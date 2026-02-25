@@ -1,4 +1,6 @@
 """FastAPI app: /chat for the widget, /ingest to re-index knowledge base."""
+import os
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,7 +15,14 @@ from rag import answer, ingest
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Optional: run ingest on startup if no index exists (so widget works out of the box with placeholders)."""
+    # Vercel's deployment filesystem is read-only; ChromaDB needs write access.
+    # Copy the committed chroma_db to /tmp (writable) on cold start.
+    if os.environ.get("VERCEL"):
+        src = Path(__file__).parent / "chroma_db"
+        dst = Path("/tmp/chroma_db")
+        if src.exists() and not dst.exists():
+            shutil.copytree(str(src), str(dst))
+        settings.chroma_persist_dir = dst
     yield
 
 
@@ -26,7 +35,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.origins_list,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -44,6 +53,12 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+
+
+@app.get("/")
+def root():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/widget/test.html", status_code=302)
 
 
 @app.get("/health")
